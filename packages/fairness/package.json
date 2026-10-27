@@ -1,0 +1,28 @@
+{
+  "name": "@bet/fairness",
+  "version": "0.1.0",
+  "description": "Provably fair engine: HMAC, hash chain, game result functions, test vectors",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "test:vectors": "vitest run vectors.test.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@bet/config": "workspace:*",
+    "@bet/shared-types": "workspace:*",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

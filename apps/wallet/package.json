@@ -1,0 +1,22 @@
+{
+  "name": "@bet/wallet",
+  "version": "0.1.0",
+  "description": "Deposit watcher + withdraw signer (proses terpisah)",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.0",
+    "@bet/chain": "workspace:*",
+    "@bet/shared-types": "workspace:*",
+    "@bet/config": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}

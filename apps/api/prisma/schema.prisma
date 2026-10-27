@@ -1,0 +1,148 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  email         String?   @unique
+  walletAddress String    @unique
+  role          String    @default("player")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  kycStatus     String?   @default("pending")
+
+  balances          Balance[]
+  transactions      Transaction[]
+  bets              Bet[]
+  betBatches        BetBatch[]
+  ledgerEntries     LedgerEntry[]
+  userVip           UserVip[]
+  rakebackLedger    RakebackLedger[]
+  cashbackLedger    CashbackLedger[]
+}
+
+model Balance {
+  userId    String @db.Uuid
+  currency  String
+  balance   BigInt
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, currency])
+}
+
+model Transaction {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  type        String
+  currency    String
+  amount      BigInt
+  status      String   @default("pending")
+  referenceId String?  @db.Uuid
+  txHash      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ledgerEntries LedgerEntry[]
+}
+
+model LedgerEntry {
+  id            String   @id @default(uuid()) @db.Uuid
+  transactionId String   @db.Uuid
+  userId        String   @db.Uuid
+  currency      String
+  amount        BigInt
+  balanceAfter  BigInt
+  entryType     String
+  referenceType String?
+  referenceId   String?  @db.Uuid
+  createdAt     DateTime @default(now())
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Bet {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @db.Uuid
+  gameType      String
+  currency      String
+  amount        BigInt
+  payout        BigInt
+  houseEdge     Int
+  clientSeed    String
+  serverSeed    String?
+  nonce         Int
+  resultJson    Json
+  batchId       String?  @db.Uuid
+  createdAt     DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  batch         BetBatch? @relation(fields: [batchId], references: [id])
+}
+
+model BetBatch {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  mode           String   // "flash"
+  betCount       Int
+  totalStake     BigInt
+  totalPayout    BigInt
+  nonceStart     Int
+  nonceEnd       Int
+  stopReason     String?
+  rule           Json?
+  idempotencyKey String   @unique
+  createdAt      DateTime @default(now())
+
+  user  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bets  Bet[]
+}
+
+model VipTierConfig {
+  tier             String
+  minWagered       BigInt
+  rakebackPercent  Int
+  cashbackPercent  Int
+
+  @@id([tier])
+}
+
+model UserVip {
+  userId       String @db.Uuid
+  tier         String
+  totalWagered BigInt
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId])
+}
+
+model RakebackLedger {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  amount    BigInt
+  betId     String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CashbackLedger {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  amount     BigInt
+  periodStart DateTime
+  periodEnd   DateTime
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

@@ -1,0 +1,25 @@
+{
+  "name": "@bet/worker",
+  "version": "0.1.0",
+  "description": "BullMQ: rakeback, batching Merkle, job terjadwal",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "@nestjs/bullmq": "^10.1.0",
+    "bullmq": "^5.10.0",
+    "ioredis": "^5.4.0",
+    "@bet/fairness": "workspace:*",
+    "@bet/ledger": "workspace:*",
+    "@bet/shared-types": "workspace:*",
+    "@bet/config": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}

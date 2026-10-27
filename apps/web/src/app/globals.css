@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bet-dark: #0a0a0a;
+  --bet-panel: #111111;
+  --bet-accent: #00ff9f;
+  --bet-text: #ffffff;
+  --bet-text-muted: #888888;
+}
+
+body {
+  background: var(--bet-dark);
+  color: var(--bet-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.dark {
+  background: var(--bet-dark);
+  color: var(--bet-text);
+}
+
+.bet-accent {
+  color: var(--bet-accent);
+}
+
+.bet-bg-panel {
+  background-color: var(--bet-panel);
+}

@@ -1,0 +1,29 @@
+{
+  "name": "crypto-betting-platform",
+  "private": true,
+  "description": "Crypto betting platform on Solana devnet - Dice, Crash, Plinko, Mines",
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "pnpm -r --if-present dev",
+    "build": "pnpm -r --if-present build",
+    "lint": "pnpm -r --if-present lint",
+    "test": "pnpm -r --if-present test",
+    "test:unit": "pnpm --filter @bet/fairness --filter @bet/ledger --filter @bet/shared-types test",
+    "db:generate": "pnpm --filter @bet/api db:generate",
+    "db:push": "pnpm --filter @bet/api db:push",
+    "postinstall": "echo \"Workspace ready\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}

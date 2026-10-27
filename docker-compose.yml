@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bet-postgres
+    environment:
+      POSTGRES_USER: bet
+      POSTGRES_PASSWORD: bet
+      POSTGRES_DB: bet
+    ports:
+      - "5432:5432"
+    volumes:
+      - bet_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bet -d bet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: bet-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - bet_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  solana-test-validator:
+    image: gcr.io/ldclabs/solana-test-validator:latest
+    container_name: bet-solana-validator
+    ports:
+      - "8899:8899"
+    command: ["--reset-if-needed"]
+    healthcheck:
+      test: ["CMD-SHELL", "solana --url http://localhost:8899 cluster-version || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+volumes:
+  bet_postgres_data:
+  bet_redis_data:
