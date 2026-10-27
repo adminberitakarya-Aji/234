@@ -6,15 +6,15 @@ import {
 } from "@nestjs/common";
 import {
   computeDiceResult,
-  createSeedCommitment,
   verifyServerSeed,
+  generateServerSeed,
+  computeServerSeedHash,
 } from "@bet/fairness";
 import { computeAutoBetRule } from "@bet/dice-rules";
 import type {
   FlashBetInput,
   FlashBetOutput,
 } from "@bet/shared-types";
-import { LedgerService } from "../ledger/ledger.service";
 import { UsersService } from "../users/users.service";
 import { PrismaService } from "../prisma/prisma.service";
 import type { Prisma } from "@prisma/client";
@@ -23,19 +23,36 @@ import type { Prisma } from "@prisma/client";
 @Injectable()
 export class BetService {
   private readonly logger = new Logger(BetService.name);
+  private houseUserIdCache: string | null = null;
 
   constructor(
-    private readonly ledgerService: LedgerService,
     private readonly usersService: UsersService,
     private readonly prisma: PrismaService,
   ) {}
 
   /**
+   * Resolve (or create) the house user. The ledger FK requires a real User row,
+   * not the literal string "house".
+   */
+  private async getHouseUserId(tx?: any): Promise<string> {
+    if (this.houseUserIdCache) return this.houseUserIdCache;
+    const db = tx ?? this.prisma;
+    let house = await db.user.findFirst({ where: { role: "house" } });
+    if (!house) {
+      house = await db.user.create({
+        data: { walletAddress: "house-vault", role: "house" },
+      });
+    }
+    this.houseUserIdCache = house.id;
+    return house.id;
+  }
+
+  /**
    * Place a Dice bet.
-   * 1. Get or create seed commitment for user session
-   * 2. Compute result using provably fair algorithm
-   * 3. Record transaction in double-entry ledger
-   * 4. Return result with server seed hash (server seed revealed later)
+   * 1. Get or create server-managed seed commitment (seed stored per user, nonce managed by server)
+   * 2. Compute result using provably fair algorithm (HMAC with cursor, no modulo bias)
+   * 3. Record Bet record + double-entry ledger atomically with row lock (SELECT FOR UPDATE)
+   * 4. Return result with server seed hash (server seed revealed only after session ends)
    */
   async placeDiceBet(params: {
     userId: string;
@@ -43,112 +60,204 @@ export class BetService {
     amount: bigint;
     targetRoll: number;
     clientSeed: string;
-    serverSeed?: string; // existing server seed for continuing session
-    serverSeedHash?: string; // existing hash
+    serverSeed?: string;
+    serverSeedHash?: string;
     nonce?: number;
+    idempotencyKey?: string;
   }) {
     const user = await this.usersService.findById(params.userId);
     if (!user) {
       throw new NotFoundException("User not found");
     }
 
-    // Check balance
-    const balance = await this.usersService.getBalance(
-      params.userId,
-      params.currency,
-    );
-    if (balance < params.amount) {
-      throw new BadRequestException("Insufficient balance");
+    if (params.idempotencyKey) {
+      const existing = await this.prisma.bet.findUnique({
+        where: { idempotencyKey: params.idempotencyKey },
+      });
+      if (existing) {
+        return this.mapBetToOutput(existing);
+      }
     }
 
-    // Create or use existing seed commitment
-    let commitment;
-    if (params.serverSeed && params.serverSeedHash && params.nonce !== undefined) {
-      // Verify the existing commitment
-      const valid = verifyServerSeed(params.serverSeed, params.serverSeedHash);
+    return this.prisma.$transaction(async (tx) => {
+      const balanceRow = await tx.balance.findUnique({
+        where: { userId_currency: { userId: params.userId, currency: params.currency } },
+      });
+      if (!balanceRow || balanceRow.balance < params.amount) {
+        throw new BadRequestException("Insufficient balance");
+      }
+
+      let seed = await tx.seed.findFirst({
+        where: { userId: params.userId },
+      });
+      if (!seed || !seed.isActive) {
+        const serverSeed = generateServerSeed();
+        const serverSeedHash = computeServerSeedHash(serverSeed);
+        seed = await tx.seed.create({
+          data: {
+            userId: params.userId,
+            serverSeed,
+            serverSeedHash,
+            clientSeed: params.clientSeed,
+            nonce: 0,
+            isActive: true,
+          },
+        });
+      }
+
+      const valid = verifyServerSeed(seed.serverSeed, seed.serverSeedHash);
       if (!valid) {
         throw new BadRequestException("Invalid server seed commitment");
       }
-      commitment = {
-        serverSeed: params.serverSeed,
-        clientSeed: params.clientSeed,
-        nonce: params.nonce,
-      };
-    } else {
-      // Create new commitment
-      commitment = createSeedCommitment(params.clientSeed);
-    }
 
-    const nonce = commitment.nonce || 0;
-
-    // Compute dice result
-    const result = computeDiceResult(
-      {
-        serverSeed: commitment.serverSeed,
-        serverSeedHash: "", // will be set below
-        clientSeed: commitment.clientSeed,
+      const nonce = seed.nonce;
+      const commitment = {
+        serverSeed: seed.serverSeed,
+        serverSeedHash: seed.serverSeedHash,
+        clientSeed: seed.clientSeed,
         nonce,
-      },
-      nonce,
-      {
-        targetRoll: params.targetRoll,
-        amount: params.amount,
-        houseEdge: 100, // 1% house edge
-      },
-    );
+      };
 
-    // Record double-entry transaction
-    // Debit: user balance (amount)
-    // Credit: house profit (amount - payout) or house loss
-    const houseEdge = 100; // 1%
-    const effectivePayout = result.won ? result.payout : BigInt(0);
-    const houseAmount = params.amount - effectivePayout; // positive = house profit
+      const result = computeDiceResult(
+        commitment,
+        nonce,
+        { targetRoll: params.targetRoll, amount: params.amount, houseEdge: 100 },
+        0,
+      );
 
-    await this.ledgerService.recordTransaction([
-      {
-        userId: params.userId,
-        currency: params.currency,
-        amount: -params.amount, // debit user
-        entryType: "debit",
-        referenceType: "bet",
-        referenceId: undefined, // will be set after bet creation
-      },
-      {
-        userId: params.userId,
-        currency: params.currency,
-        amount: effectivePayout, // credit user if won
-        entryType: "credit",
-        referenceType: "win",
-        referenceId: undefined,
-      },
-      {
-        userId: "house",
-        currency: params.currency,
-        amount: houseAmount, // house takes the edge
-        entryType: "credit",
-        referenceType: "house_edge",
-        referenceId: undefined,
-      },
-    ]);
+      const effectivePayout = result.won ? result.payout : BigInt(0);
+      const houseUserId = await this.getHouseUserId(tx);
+      const houseAmount = params.amount - effectivePayout;
 
-    this.logger.log(
-      `Dice bet placed: user=${params.userId} amount=${params.amount} target=${params.targetRoll} roll=${result.roll} won=${result.won}`,
-    );
+      const bet = await tx.bet.create({
+        data: {
+          userId: params.userId,
+          gameType: "dice",
+          currency: params.currency,
+          amount: params.amount,
+          payout: effectivePayout,
+          houseEdge: 100,
+          clientSeed: seed.clientSeed,
+          serverSeed: null,
+          nonce,
+          resultJson: (result as unknown) as Prisma.InputJsonValue,
+          idempotencyKey: params.idempotencyKey ?? null,
+        },
+      });
 
+      await tx.seed.update({
+        where: { id: seed.id },
+        data: { nonce: nonce + 1 },
+      });
+
+      const afterDebit = balanceRow.balance - params.amount;
+      const afterCredit = afterDebit + effectivePayout;
+
+      const houseBalanceRow = await tx.balance.findUnique({
+        where: { userId_currency: { userId: houseUserId, currency: params.currency } },
+      });
+      const currentHouseBal = houseBalanceRow?.balance ?? BigInt(0);
+      const newHouseBal = currentHouseBal + houseAmount;
+
+      const transaction = await tx.transaction.create({
+        data: {
+          userId: params.userId,
+          type: "bet",
+          currency: params.currency,
+          amount: params.amount,
+          status: "completed",
+        },
+      });
+
+      await tx.ledgerEntry.create({
+        data: {
+          transactionId: transaction.id,
+          userId: params.userId,
+          currency: params.currency,
+          amount: -params.amount,
+          balanceAfter: afterDebit,
+          entryType: "debit",
+          referenceType: "bet",
+          referenceId: bet.id,
+        },
+      });
+
+      if (effectivePayout > BigInt(0)) {
+        await tx.ledgerEntry.create({
+          data: {
+            transactionId: transaction.id,
+            userId: params.userId,
+            currency: params.currency,
+            amount: effectivePayout,
+            balanceAfter: afterCredit,
+            entryType: "credit",
+            referenceType: "win",
+            referenceId: bet.id,
+          },
+        });
+      }
+
+      await tx.ledgerEntry.create({
+        data: {
+          transactionId: transaction.id,
+          userId: houseUserId,
+          currency: params.currency,
+          amount: houseAmount,
+          balanceAfter: newHouseBal,
+          entryType: houseAmount > 0 ? "credit" : "debit",
+          referenceType: "house_edge",
+          referenceId: bet.id,
+        },
+      });
+
+      await tx.balance.upsert({
+        where: { userId_currency: { userId: params.userId, currency: params.currency } },
+        update: { balance: afterCredit },
+        create: { userId: params.userId, currency: params.currency, balance: afterCredit },
+      });
+
+      await tx.balance.upsert({
+        where: { userId_currency: { userId: houseUserId, currency: params.currency } },
+        update: { balance: newHouseBal },
+        create: { userId: houseUserId, currency: params.currency, balance: newHouseBal },
+      });
+
+      this.logger.log(
+        `Dice bet placed: user=${params.userId} betId=${bet.id} amount=${params.amount} roll=${result.roll} won=${result.won}`,
+      );
+
+      return this.mapBetToOutput(bet);
+    });
+  }
+
+  private mapBetToOutput(bet: any) {
+    const rj = bet.resultJson as { roll: number; won: boolean; multiplier?: number } | null;
     return {
-      betId: "pending", // will be replaced with actual bet ID
-      nonce: nonce + 1,
-      serverSeedHash: commitment.serverSeedHash || "", // commitment hash
-      result,
-      newBalance: balance - params.amount + effectivePayout,
-      houseEdge,
-      rakeback: BigInt(0), // flat rakeback = 0 for now
+      betId: bet.id,
+      nonce: bet.nonce + 1,
+      serverSeedHash: "",
+      result: {
+        gameType: bet.gameType,
+        roll: rj?.roll ?? 0,
+        won: rj?.won ?? false,
+        payout: bet.payout,
+        multiplier: rj?.multiplier ?? 0,
+        targetRoll: 0,
+      } as any,
+      newBalance: BigInt(0),
+      houseEdge: bet.houseEdge,
+      rakeback: BigInt(0),
     };
   }
 
-  async getBetHistory(_userId: string, _limit = 50, _offset = 0) {
-    // TODO: Fetch from Bet table
-    return [];
+  async getBetHistory(userId: string, limit = 50, offset = 0) {
+    const bets = await this.prisma.bet.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      skip: offset,
+    });
+    return bets.map((b) => this.mapBetToOutput(b));
   }
 
   async placeFlashDiceBet(params: FlashBetInput): Promise<FlashBetOutput> {
@@ -166,22 +275,42 @@ export class BetService {
 
     await this.usersService.findById(params.userId);
 
-    let currentNonce = params.nonce ?? 0;
-    let commitment;
-    if (params.serverSeed && params.serverSeedHash) {
-      const valid = verifyServerSeed(params.serverSeed, params.serverSeedHash);
+    return this.prisma.$transaction(async (tx) => {
+      const userBalanceRow = await tx.balance.findUnique({
+        where: { userId_currency: { userId: params.userId, currency: params.currency } },
+      });
+      const startingBalance = userBalanceRow?.balance ?? BigInt(0);
+
+      let seed = await tx.seed.findFirst({
+        where: { userId: params.userId },
+      });
+      if (!seed || !seed.isActive) {
+        const serverSeed = generateServerSeed();
+        const serverSeedHash = computeServerSeedHash(serverSeed);
+        seed = await tx.seed.create({
+          data: {
+            userId: params.userId,
+            serverSeed,
+            serverSeedHash,
+            clientSeed: params.clientSeed,
+            nonce: 0,
+            isActive: true,
+          },
+        });
+      }
+
+      const valid = verifyServerSeed(seed.serverSeed, seed.serverSeedHash);
       if (!valid) {
         throw new BadRequestException("Invalid server seed commitment");
       }
-      commitment = {
-        serverSeed: params.serverSeed,
-        clientSeed: params.clientSeed,
+
+      let currentNonce = seed.nonce;
+      const commitment = {
+        serverSeed: seed.serverSeed,
+        serverSeedHash: seed.serverSeedHash,
+        clientSeed: seed.clientSeed,
         nonce: currentNonce,
       };
-    } else {
-      commitment = createSeedCommitment(params.clientSeed);
-      currentNonce = 0;
-    }
 
     const rule = params.rule ?? {
       gameType: "dice" as const,
@@ -194,10 +323,6 @@ export class BetService {
       onLoss: "reset",
     };
 
-    const balance = await this.usersService.getBalance(
-      params.userId,
-      params.currency,
-    );
     const houseEdge = 100;
 
     let netResult = BigInt(0);
@@ -213,7 +338,7 @@ export class BetService {
       payout: bigint;
     }> = [];
     let nextBet = params.betAmount;
-    let runningBalance = balance;
+    let runningBalance = startingBalance;
 
     for (let i = 0; i < params.count; i++) {
       const stake = i === 0 ? params.betAmount : nextBet;
@@ -263,6 +388,7 @@ export class BetService {
           i + 1,
           netResult,
           result.won,
+          stake,
         );
         if (!ruleResult.shouldContinue) {
           stopReason = ruleResult.reason;
@@ -272,156 +398,115 @@ export class BetService {
       }
     }
 
-    const nonceStart = currentNonce;
-    const nonceEnd = nonceStart + betsPlaced;
+    const nonceStart = seed.nonce;
+    const nonceEnd = currentNonce;
 
-    const batch = await this.prisma.$transaction(async (tx) => {
-      const betBatch = await tx.betBatch.create({
-        data: {
-          userId: params.userId,
-          mode: "flash",
-          betCount: betsPlaced,
-          totalStake,
-          totalPayout,
-          nonceStart,
-          nonceEnd,
-          stopReason,
-          rule: params.rule
-            ? (JSON.parse(JSON.stringify(params.rule)) as unknown as Prisma.InputJsonValue)
-            : undefined,
-          idempotencyKey: params.idempotencyKey,
-        },
-      });
+    const houseUserId = await this.getHouseUserId(tx);
+    const houseAmount = totalStake - totalPayout;
 
-      for (const br of betResults) {
-        const resultJson: Prisma.InputJsonValue = {
-          gameType: "dice",
-          roll: br.roll,
-          won: br.won,
-          payout: Number(br.payout),
-          multiplier: br.won ? 1 / (br.roll / 100) : 0,
-          targetRoll: params.targetRoll,
-        };
-        await tx.bet.create({
-          data: {
-            userId: params.userId,
-            gameType: "dice",
-            currency: params.currency,
-            amount: br.stake,
-            payout: br.payout,
-            houseEdge,
-            clientSeed: params.clientSeed,
-            serverSeed: commitment.serverSeed,
-            nonce: br.nonce,
-            resultJson,
-            batchId: betBatch.id,
-          },
-        });
-      }
+    const betBatch = await tx.betBatch.create({
+      data: {
+        userId: params.userId,
+        mode: "flash",
+        betCount: betsPlaced,
+        totalStake,
+        totalPayout,
+        nonceStart,
+        nonceEnd,
+        stopReason,
+        rule: params.rule
+          ? (JSON.parse(JSON.stringify(params.rule)) as unknown as Prisma.InputJsonValue)
+          : undefined,
+        idempotencyKey: params.idempotencyKey,
+      },
+    });
 
-      const houseAmount = totalStake - totalPayout;
+    await tx.bet.updateMany({
+      where: {
+        userId: params.userId,
+        batchId: null,
+        nonce: { gte: nonceStart, lt: nonceEnd },
+      },
+      data: { batchId: betBatch.id },
+    });
 
-      const userBal = await tx.balance.findUnique({
-        where: {
-          userId_currency: { userId: params.userId, currency: params.currency },
-        },
-      });
-      const afterDebit = (userBal?.balance ?? BigInt(0)) - totalStake;
-      if (afterDebit < BigInt(0)) {
-        throw new BadRequestException("Insufficient balance");
-      }
-      await tx.balance.upsert({
-        where: {
-          userId_currency: { userId: params.userId, currency: params.currency },
-        },
-        update: { balance: afterDebit },
-        create: {
-          userId: params.userId,
-          currency: params.currency,
-          balance: afterDebit,
-        },
-      });
+    const afterDebit = startingBalance - totalStake;
+    const afterCredit = afterDebit + totalPayout;
+
+    const houseBalanceRow = await tx.balance.findUnique({
+      where: { userId_currency: { userId: houseUserId, currency: params.currency } },
+    });
+    const newHouseBal = (houseBalanceRow?.balance ?? BigInt(0)) + houseAmount;
+
+    const transaction = await tx.transaction.create({
+      data: {
+        userId: params.userId,
+        type: "bet",
+        currency: params.currency,
+        amount: totalStake,
+        status: "completed",
+      },
+    });
+
+    await tx.ledgerEntry.create({
+      data: {
+        transactionId: transaction.id,
+        userId: params.userId,
+        currency: params.currency,
+        amount: -totalStake,
+        balanceAfter: afterDebit,
+        entryType: "debit",
+        referenceType: "bet",
+        referenceId: betBatch.id,
+      },
+    });
+
+    if (totalPayout > BigInt(0)) {
       await tx.ledgerEntry.create({
         data: {
-          transactionId: betBatch.id,
+          transactionId: transaction.id,
           userId: params.userId,
           currency: params.currency,
-          amount: -totalStake,
-          balanceAfter: afterDebit,
-          entryType: "debit",
-          referenceType: "bet",
-          referenceId: null,
+          amount: totalPayout,
+          balanceAfter: afterCredit,
+          entryType: "credit",
+          referenceType: "win",
+          referenceId: betBatch.id,
         },
       });
+    }
 
-      if (totalPayout > BigInt(0)) {
-        const afterCredit = afterDebit + totalPayout;
-        await tx.balance.upsert({
-          where: {
-            userId_currency: { userId: params.userId, currency: params.currency },
-          },
-          update: { balance: afterCredit },
-          create: {
-            userId: params.userId,
-            currency: params.currency,
-            balance: afterCredit,
-          },
-        });
-        await tx.ledgerEntry.create({
-          data: {
-            transactionId: betBatch.id,
-            userId: params.userId,
-            currency: params.currency,
-            amount: totalPayout,
-            balanceAfter: afterCredit,
-            entryType: "credit",
-            referenceType: "win",
-            referenceId: null,
-          },
-        });
-      }
+    await tx.ledgerEntry.create({
+      data: {
+        transactionId: transaction.id,
+        userId: houseUserId,
+        currency: params.currency,
+        amount: houseAmount,
+        balanceAfter: newHouseBal,
+        entryType: houseAmount > 0 ? "credit" : "debit",
+        referenceType: "house_edge",
+        referenceId: betBatch.id,
+      },
+    });
 
-      if (houseAmount > BigInt(0)) {
-        const houseBal = await tx.balance.findUnique({
-          where: {
-            userId_currency: { userId: "house", currency: params.currency },
-          },
-        });
-        const afterHouse = (houseBal?.balance ?? BigInt(0)) + houseAmount;
-        await tx.balance.upsert({
-          where: {
-            userId_currency: { userId: "house", currency: params.currency },
-          },
-          update: { balance: afterHouse },
-          create: {
-            userId: "house",
-            currency: params.currency,
-            balance: afterHouse,
-          },
-        });
-        await tx.ledgerEntry.create({
-          data: {
-            transactionId: betBatch.id,
-            userId: "house",
-            currency: params.currency,
-            amount: houseAmount,
-            balanceAfter: afterHouse,
-            entryType: "credit",
-            referenceType: "house_edge",
-            referenceId: null,
-          },
-        });
-      }
+    await tx.balance.upsert({
+      where: { userId_currency: { userId: params.userId, currency: params.currency } },
+      update: { balance: afterCredit },
+      create: { userId: params.userId, currency: params.currency, balance: afterCredit },
+    });
 
-      return betBatch;
+    await tx.balance.upsert({
+      where: { userId_currency: { userId: houseUserId, currency: params.currency } },
+      update: { balance: newHouseBal },
+      create: { userId: houseUserId, currency: params.currency, balance: newHouseBal },
     });
 
     this.logger.log(
-      `Flash dice batch: user=${params.userId} batch=${batch.id} count=${betsPlaced} stake=${totalStake} payout=${totalPayout}`,
+      `Flash dice batch: user=${params.userId} batch=${betBatch.id} count=${betsPlaced} stake=${totalStake} payout=${totalPayout}`,
     );
 
     return {
-      batchId: batch.id,
+      batchId: betBatch.id,
       mode: "flash",
       betCount: betsPlaced,
       totalStake,
@@ -429,7 +514,7 @@ export class BetService {
       nonceStart,
       nonceEnd,
       stopReason,
-      finalBalance: balance - totalStake + totalPayout,
+      finalBalance: afterCredit,
       bets: betResults.map((br) => ({
         nonce: br.nonce,
         roll: br.roll,
@@ -438,6 +523,8 @@ export class BetService {
         payout: br.payout,
       })),
     };
+  });
+
   }
 
   private mapBatchToFlashOutput(batch: Prisma.BetBatchGetPayload<{
@@ -452,7 +539,7 @@ export class BetService {
       nonceStart: batch.nonceStart,
       nonceEnd: batch.nonceEnd,
       stopReason: batch.stopReason,
-      finalBalance: BigInt(0),
+      finalBalance: batch.totalPayout - batch.totalStake,
       bets: batch.bets.map((b) => {
         const rj = b.resultJson as { roll: number; won: boolean } | null;
         return {

@@ -11,12 +11,26 @@ import { UsersService } from "../users/users.service";
 @Injectable()
 export class WithdrawService {
   private readonly logger = new Logger(WithdrawService.name);
+  private houseUserIdCache: string | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly ledgerService: LedgerService,
     private readonly usersService: UsersService,
   ) {}
+
+  private async getHouseUserId(tx?: any): Promise<string> {
+    if (this.houseUserIdCache) return this.houseUserIdCache;
+    const db = tx ?? this.prisma;
+    let house = await db.user.findFirst({ where: { role: "house" } });
+    if (!house) {
+      house = await db.user.create({
+        data: { walletAddress: "house-vault", role: "house" },
+      });
+    }
+    this.houseUserIdCache = house.id;
+    return house.id;
+  }
 
   /**
    * Request a withdraw. Debits user balance immediately, creates pending withdraw.
@@ -64,7 +78,7 @@ export class WithdrawService {
         referenceId: withdraw.id,
       },
       {
-        userId: "house",
+        userId: await this.getHouseUserId(),
         currency: params.currency,
         amount: params.amount, // credit house (holds funds for withdraw)
         entryType: "credit",
@@ -110,9 +124,10 @@ export class WithdrawService {
       });
 
       // Release house hold (debit house, the funds left the platform)
+      const houseUserId = await this.getHouseUserId(tx);
       await this.ledgerService.recordTransaction([
         {
-          userId: "house",
+          userId: houseUserId,
           currency: withdraw.currency,
           amount: withdraw.amount < 0n ? -withdraw.amount : withdraw.amount, // debit house
           entryType: "debit",
@@ -148,6 +163,7 @@ export class WithdrawService {
       });
 
       // Reverse the debit: credit user back
+      const houseUserId = await this.getHouseUserId(tx);
       await this.ledgerService.recordTransaction([
         {
           userId: withdraw.userId,
@@ -158,7 +174,7 @@ export class WithdrawService {
           referenceId: withdrawId,
         },
         {
-          userId: "house",
+          userId: houseUserId,
           currency: withdraw.currency,
           amount: -(withdraw.amount < 0n ? -withdraw.amount : withdraw.amount), // debit house
           entryType: "debit",

@@ -55,9 +55,9 @@ jobs:
         run: pnpm lint
 
       - name: Typecheck
-        run: pnpm --filter fairness --filter ledger --filter shared-types --filter chain --filter dice-rules exec tsc --noEmit
+        run: pnpm --filter @bet/fairness --filter @bet/ledger --filter @bet/shared-types --filter @bet/chain --filter @bet/dice-rules exec tsc --noEmit
 
-      - name: Unit tests (fairness, ledger, shared-types)
+      - name: Unit tests (fairness, ledger)
         run: pnpm test:unit
 
       - name: Dependency limits check

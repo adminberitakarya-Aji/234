@@ -11,12 +11,26 @@ import { UsersService } from "../users/users.service";
 @Injectable()
 export class DepositService {
   private readonly logger = new Logger(DepositService.name);
+  private houseUserIdCache: string | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly ledgerService: LedgerService,
     private readonly usersService: UsersService,
   ) {}
+
+  private async getHouseUserId(tx?: any): Promise<string> {
+    if (this.houseUserIdCache) return this.houseUserIdCache;
+    const db = tx ?? this.prisma;
+    let house = await db.user.findFirst({ where: { role: "house" } });
+    if (!house) {
+      house = await db.user.create({
+        data: { walletAddress: "house-vault", role: "house" },
+      });
+    }
+    this.houseUserIdCache = house.id;
+    return house.id;
+  }
 
   /**
    * Create a pending deposit record.
@@ -79,6 +93,7 @@ export class DepositService {
       });
 
       // Credit user balance via ledger (double-entry)
+      const houseUserId = await this.getHouseUserId(tx);
       await this.ledgerService.recordTransaction([
         {
           userId: deposit.userId,
@@ -89,7 +104,7 @@ export class DepositService {
           referenceId: depositId,
         },
         {
-          userId: "house",
+          userId: houseUserId,
           currency: deposit.currency,
           amount: -deposit.amount, // debit house (source of funds)
           entryType: "debit",

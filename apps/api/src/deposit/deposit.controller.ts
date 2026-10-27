@@ -49,6 +49,7 @@ export class DepositController {
   }
 
   // Internal endpoint for wallet worker to confirm on-chain deposit
+  @UseGuards(JwtAuthGuard)
   @Post("confirm")
   async confirm(@Body() body: { depositId: string; txHash: string }) {
     return this.depositService.processDeposit(body.depositId, body.txHash);

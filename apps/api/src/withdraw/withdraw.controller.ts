@@ -54,16 +54,19 @@ export class WithdrawController {
   }
 
   // Internal endpoints for wallet worker
+  @UseGuards(JwtAuthGuard)
   @Post("pending")
   async getPending() {
     return this.withdrawService.getPendingWithdraws();
   }
 
+  @UseGuards(JwtAuthGuard)
   @Post("complete")
   async complete(@Body() body: { withdrawId: string; txHash: string }) {
     return this.withdrawService.completeWithdraw(body.withdrawId, body.txHash);
   }
 
+  @UseGuards(JwtAuthGuard)
   @Post("reject")
   async reject(@Body() body: { withdrawId: string; reason: string }) {
     return this.withdrawService.rejectWithdraw(body.withdrawId, body.reason);

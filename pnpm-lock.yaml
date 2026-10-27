@@ -52,13 +52,16 @@ importers:
         version: 10.0.3(@nestjs/common@10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2))(passport@0.7.0)
       '@nestjs/platform-ws':
         specifier: ^10.4.0
-        version: 10.4.22(@nestjs/common@10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/websockets@10.4.22)(bufferutil@4.1.0)(rxjs@7.8.2)(utf-8-validate@6.0.6)
+        version: 10.4.22(@nestjs/common@10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/websockets@10.4.22)(bufferutil@4.1.0)(rxjs@7.8.2)
       '@nestjs/websockets':
         specifier: ^10.4.0
         version: 10.4.22(@nestjs/common@10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@10.4.22)(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@prisma/client':
         specifier: ^5.15.0
         version: 5.22.0(prisma@5.22.0)
+      '@solana/web3.js':
+        specifier: ^1.95.0
+        version: 1.99.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
       bcryptjs:
         specifier: ^2.4.3
         version: 2.4.3
@@ -4030,13 +4033,13 @@ snapshots:
       '@nestjs/common': 10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2)
       passport: 0.7.0
 
-  '@nestjs/platform-ws@10.4.22(@nestjs/common@10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/websockets@10.4.22)(bufferutil@4.1.0)(rxjs@7.8.2)(utf-8-validate@6.0.6)':
+  '@nestjs/platform-ws@10.4.22(@nestjs/common@10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/websockets@10.4.22)(bufferutil@4.1.0)(rxjs@7.8.2)':
     dependencies:
       '@nestjs/common': 10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/websockets': 10.4.22(@nestjs/common@10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@10.4.22)(reflect-metadata@0.2.2)(rxjs@7.8.2)
       rxjs: 7.8.2
       tslib: 2.8.1
-      ws: 8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      ws: 8.18.0(bufferutil@4.1.0)
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -5972,7 +5975,7 @@ snapshots:
 
   isexe@2.0.0: {}
 
-  isomorphic-ws@4.0.1(ws@7.5.13(bufferutil@4.1.0)):
+  isomorphic-ws@4.0.1(ws@7.5.13(bufferutil@4.1.0)(utf-8-validate@6.0.6)):
     dependencies:
       ws: 7.5.13(bufferutil@4.1.0)(utf-8-validate@6.0.6)
 
@@ -6008,7 +6011,7 @@ snapshots:
       delay: 5.0.0
       es6-promisify: 5.0.0
       eyes: 0.1.8
-      isomorphic-ws: 4.0.1(ws@7.5.13(bufferutil@4.1.0))
+      isomorphic-ws: 4.0.1(ws@7.5.13(bufferutil@4.1.0)(utf-8-validate@6.0.6))
       json-stringify-safe: 5.0.1
       stream-json: 1.9.1
       uuid: 8.3.2
@@ -7354,10 +7357,9 @@ snapshots:
       bufferutil: 4.1.0
       utf-8-validate: 6.0.6
 
-  ws@8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6):
+  ws@8.18.0(bufferutil@4.1.0):
     optionalDependencies:
       bufferutil: 4.1.0
-      utf-8-validate: 6.0.6
 
   ws@8.21.3(bufferutil@4.1.0)(utf-8-validate@6.0.6):
     optionalDependencies:

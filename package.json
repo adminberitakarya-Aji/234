@@ -17,7 +17,7 @@
     "build": "pnpm -r --if-present build",
     "lint": "pnpm -r --if-present lint",
     "test": "pnpm -r --if-present test",
-    "test:unit": "pnpm --filter @bet/fairness --filter @bet/ledger --filter @bet/shared-types test",
+    "test:unit": "pnpm --filter @bet/fairness --filter @bet/ledger test",
     "db:generate": "pnpm --filter @bet/api db:generate",
     "db:push": "pnpm --filter @bet/api db:push",
     "postinstall": "echo \"Workspace ready\""

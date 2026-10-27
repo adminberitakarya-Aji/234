@@ -29,11 +29,31 @@ export function secureCompare(a: Buffer, b: Buffer): boolean {
 
 /**
  * Convert first 4 bytes of HMAC output to a roll in range [0, 99.99].
- * Used by Dice, Plinko, Mines.
+ * Uses modulo; kept for backward compatibility with Mines/Plinko.
+ * Dice should use hmacToRollFloat (no modulo bias) per PRD.
  */
 export function hmacToRoll(hmac: Buffer): number {
   const value = hmac.readUInt32BE(0);
   return (value % 10000) / 100;
+}
+
+/**
+ * Convert first 4 bytes of HMAC output to a roll in range [0, 100).
+ * PRD: 4-byte float, NO modulo (eliminates modulo bias, no cursor bias).
+ * value / 0xffffffff yields [0, 1); scaled to [0, 100).
+ */
+export function hmacToRollFloat(hmac: Buffer): number {
+  const value = hmac.readUInt32BE(0);
+  return (value / 0xffffffff) * 100;
+}
+
+/**
+ * Convert first 4 bytes of HMAC output to a float in range [0, 1).
+ * Used by Mines (Fisher-Yates shuffle) and Plinko (per-row path).
+ */
+export function hmacToFloat(hmac: Buffer): number {
+  const value = hmac.readUInt32BE(0);
+  return value / 0xffffffff;
 }
 
 /**

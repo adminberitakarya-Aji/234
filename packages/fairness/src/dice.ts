@@ -1,5 +1,5 @@
 import type { GameResult } from "@bet/shared-types";
-import { hmacSha256, hmacToRoll } from "./hmac";
+import { hmacSha256, hmacToRollFloat } from "./hmac";
 import type { SeedCommitment } from "./seed";
 
 export interface DiceBetParams {
@@ -15,22 +15,24 @@ export interface DiceResult extends GameResult {
 export function computeDiceResult(
   commitment: SeedCommitment,
   nonce: number,
-  params: DiceBetParams
+  params: DiceBetParams,
+  cursor = 0,
 ): DiceResult {
+  // PRD: HMAC(server_seed, client_seed:nonce:cursor), 4-byte float, no modulo.
   const message = Buffer.from(
-    `${commitment.clientSeed}:${nonce}`,
+    `${commitment.clientSeed}:${nonce}:${cursor}`,
     "utf8"
   );
   const key = Buffer.from(commitment.serverSeed, "hex");
   const hmac = hmacSha256(key, message);
-  const roll = hmacToRoll(hmac);
+  const roll = hmacToRollFloat(hmac);
 
   const won = roll <= params.targetRoll;
-  // Payout = amount * (1 / (probability * (1 - houseEdge)))
+  // Payout = amount * (1 - houseEdge) / probability
+  // Edge must REDUCE payout (house keeps the edge), never increase it.
   // probability = targetRoll / 100
   const probability = params.targetRoll / 100;
-  const effectiveProbability = probability * (1 - params.houseEdge / 10000);
-  const multiplier = won ? 1 / effectiveProbability : 0;
+  const multiplier = won ? (1 - params.houseEdge / 10000) / probability : 0;
   const payout = won ? BigInt(Math.floor(Number(params.amount) * multiplier)) : BigInt(0);
 
   return {

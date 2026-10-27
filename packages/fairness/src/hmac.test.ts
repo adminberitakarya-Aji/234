@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hmacSha256, hmacToRoll, hmacToMultiplier, secureCompare } from "./hmac";
+import { hmacSha256, hmacToRoll, hmacToRollFloat, hmacToMultiplier, secureCompare } from "./hmac";
 
 describe("HMAC-SHA256", () => {
   it("produces deterministic output for same inputs", () => {
@@ -41,5 +41,18 @@ describe("HMAC-SHA256", () => {
     const a = Buffer.from("hello");
     const b = Buffer.from("helloo");
     expect(secureCompare(a, b)).toBe(false);
+  });
+
+  it("hmacToRollFloat returns value in range [0, 100] without modulo", () => {
+    const hmac = Buffer.alloc(32, 0xff);
+    const roll = hmacToRollFloat(hmac);
+    expect(roll).toBeGreaterThanOrEqual(0);
+    expect(roll).toBeLessThanOrEqual(100);
+  });
+
+  it("hmacToRollFloat avoids modulo bias (all-ff maps to 100, not capped at 99.99)", () => {
+    const hmac = Buffer.alloc(32, 0xff);
+    expect(hmacToRoll(hmac)).toBeCloseTo(72.95, 6);
+    expect(hmacToRollFloat(hmac)).toBe(100);
   });
 });

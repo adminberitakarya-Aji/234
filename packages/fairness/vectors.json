@@ -7,24 +7,27 @@
       "serverSeed": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
       "clientSeed": "player_seed_001",
       "nonce": 1,
-      "expectedRoll": 42.37,
-      "expectedHmac": "7f8a3c2d1e4b5a6f9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e"
+      "cursor": 0,
+      "expectedRoll": 49.27039343148246,
+      "expectedHmac": "7e21d85499c13b0b87dbf53d2055afce064e6f556260b1c4884c1df23fc62152"
     },
     {
       "name": "dice_vector_2",
       "serverSeed": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
       "clientSeed": "player_seed_001",
       "nonce": 2,
-      "expectedRoll": 15.82,
-      "expectedHmac": "3e4d5c6b7a8f9e0d1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a6f7e8d9c0b1a2f3e4d"
+      "cursor": 0,
+      "expectedRoll": 79.68643055755796,
+      "expectedHmac": "cbff4c93cdd644aa8866d576f3ef46fac02fd7f9893262715508b82324ec0c02"
     },
     {
       "name": "crash_vector_1",
       "serverSeed": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
       "clientSeed": "crash_player",
       "nonce": 1,
-      "expectedMultiplier": 2.45,
-      "expectedHmac": "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e"
+      "cursor": 0,
+      "expectedMultiplier": 340.31,
+      "expectedHmac": "6b5ff6808dbf147bfd776c90dce2c948b419f2ca6deb13200a714d454d763109"
     }
   ]
 }
